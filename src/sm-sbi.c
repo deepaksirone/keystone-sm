@@ -7,6 +7,7 @@
 #include "enclave.h"
 #include "page.h"
 #include "cpu.h"
+#include "sm-time.h"
 #include "platform-hook.h"
 #include "plugins/plugins.h"
 #include <sbi/riscv_asm.h>
@@ -89,6 +90,22 @@ unsigned long sbi_sm_get_sealing_key(uintptr_t sealing_key, uintptr_t key_ident,
 unsigned long sbi_sm_random()
 {
   return (unsigned long) platform_random();
+}
+
+unsigned long sbi_sm_set_unix_time(uintptr_t unix_time)
+{
+  unsigned long ret;
+  ret = set_unix_time(unix_time);
+
+  return ret;
+}
+
+unsigned long sbi_sm_get_unix_time()
+{
+  unsigned long ret;
+  ret = get_unix_time();
+  
+  return ret;
 }
 
 unsigned long sbi_sm_call_plugin(uintptr_t plugin_id, uintptr_t call_id, uintptr_t arg0, uintptr_t arg1)

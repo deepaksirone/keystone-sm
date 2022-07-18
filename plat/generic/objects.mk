@@ -13,6 +13,7 @@ platform-objs-y += ../../src/pmp.o
 platform-objs-y += ../../src/sm.o
 platform-objs-y += ../../src/sm-sbi.o
 platform-objs-y += ../../src/sm-sbi-opensbi.o
+platform-objs-y += ../../src/sm-time.o
 platform-objs-y += ../../src/thread.o
 platform-objs-y += ../../src/mprv.o
 platform-objs-y += ../../src/sbi_trap_hack.o

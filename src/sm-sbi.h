@@ -36,6 +36,12 @@ unsigned long
 sbi_sm_random();
 
 unsigned long
+sbi_sm_set_unix_time(uintptr_t unix_time);
+
+unsigned long
+sbi_sm_get_unix_time();
+
+unsigned long
 sbi_sm_call_plugin(uintptr_t plugin_id, uintptr_t call_id, uintptr_t arg0, uintptr_t arg1);
 
 #endif
