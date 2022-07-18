@@ -39,7 +39,7 @@ unsigned long get_unix_time()
    }
 
    unsigned long current_mtime = get_cycles();
-   unsigned long ret = saved_unix_timetamp + (current_mtime - saved_mtime_value) / TIMEBASE_FREQ;
+   unsigned long ret = saved_unix_timestamp + (current_mtime - saved_mtime_value) / TIMEBASE_FREQ;
    return ret;
 }
 
