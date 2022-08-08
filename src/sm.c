@@ -9,11 +9,14 @@
 #include "enclave.h"
 #include "platform-hook.h"
 #include "sm-sbi-opensbi.h"
+#include "sm-time.h"
 #include <sbi/sbi_string.h>
 #include <sbi/riscv_locks.h>
 #include <sbi/riscv_barrier.h>
 #include <sbi/sbi_console.h>
 #include <sbi/sbi_hart.h>
+#include <sbi/sbi_scratch.h>
+#include <sbi/sbi_math.h>
 
 static int sm_init_done = 0;
 static int sm_region_id = 0, os_region_id = 0;
@@ -40,7 +43,9 @@ int osm_pmp_set(uint8_t perm)
 int smm_init()
 {
   int region = -1;
-  int ret = pmp_region_init_atomic(SMM_BASE, SMM_SIZE, PMP_PRI_TOP, &region, 0);
+  struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+  sbi_printf("[SM] Setting PMP for SMM region\n[SM] Start Address: %lu, Size: %lu\n", scratch->fw_start, 1UL << log2roundup(scratch->fw_size));
+  int ret = pmp_region_init_atomic(scratch->fw_start, 1UL << log2roundup(scratch->fw_size), PMP_PRI_TOP, &region, 0);
   if(ret)
     return -1;
 
@@ -154,6 +159,13 @@ void sm_init(bool cold_boot)
 
     // Init the enclave metadata
     enclave_init_metadata();
+
+    //Set the timebase frequency
+    if (init_timebase_freq()) {
+	sbi_printf("[SM] Error setting timebase frequency from FDT\n");
+    } else {
+	sbi_printf("[SM] Timebase frequency set to %lu Hz\n", get_timebase_freq());
+    }
 
     sm_init_done = 1;
     mb();
