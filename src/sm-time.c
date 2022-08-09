@@ -1,5 +1,6 @@
 #include "sm-time.h"
 #include <sbi/riscv_locks.h>
+#include <sbi/sbi_timer.h>
 #include <sbi_utils/fdt/fdt_helper.h>
 #include <limits.h>
 
@@ -11,6 +12,8 @@ static unsigned long int saved_unix_timestamp = ULONG_MAX;
 static unsigned long int saved_mtime_value = ULONG_MAX;
 static unsigned long int timebase_freq = 10000000;
 
+//Causes an illegal insn trap --> using sbi_timer_value() instead of this
+/*
 typedef unsigned long cycles_t;
 
 static inline cycles_t get_cycles(void)
@@ -21,13 +24,13 @@ static inline cycles_t get_cycles(void)
                 "rdtime %0"
                 : "=r" (n));
         return n;
-}
+}*/
 
 unsigned long set_unix_time(uintptr_t unix_time)
 {
    spin_lock(&time_lock);
    //TODO: verify that the set call is made from a valid ntp enclave
-   saved_mtime_value = get_cycles();
+   saved_mtime_value = sbi_timer_value();
    saved_unix_timestamp = unix_time;
    
    spin_unlock(&time_lock);
@@ -40,7 +43,7 @@ unsigned long get_unix_time()
       return ULONG_MAX;
    }
 
-   unsigned long current_mtime = get_cycles();
+   unsigned long current_mtime = sbi_timer_value();
    unsigned long ret = saved_unix_timestamp + (current_mtime - saved_mtime_value) / timebase_freq;
    return ret;
 }
