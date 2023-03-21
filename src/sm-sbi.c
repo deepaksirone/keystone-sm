@@ -8,6 +8,7 @@
 #include "page.h"
 #include "cpu.h"
 #include "sm-time.h"
+#include "sm-nonce.h"
 #include "platform-hook.h"
 #include "plugins/plugins.h"
 #include <sbi/riscv_asm.h>
@@ -91,6 +92,24 @@ unsigned long sbi_sm_random()
 {
   return (unsigned long) platform_random();
 }
+
+unsigned long sbi_sm_track_nonce(unsigned long nonce)
+{
+  //unsigned long r = platform_random();
+  int t = add_tracking_entry(nonce);
+  return t;
+  //TODO: Impl this
+}
+
+unsigned long sbi_sm_verify_nonce(unsigned long nonce)
+{
+  //Use cpu_get_enclave_id() here
+  // Then lookup the hash of the enclave and add it to the tracked nonces
+  unsigned long ret = verify_nonce(nonce, cpu_get_enclave_id());
+  
+  return ret;
+}
+
 
 unsigned long sbi_sm_set_unix_time(uintptr_t unix_time)
 {

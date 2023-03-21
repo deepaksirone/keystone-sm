@@ -7,22 +7,131 @@
 #include "pmp.h"
 #include "page.h"
 #include "cpu.h"
+#include "sm-nonce.h"
 #include "platform-hook.h"
 #include <sbi/sbi_string.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_locks.h>
 #include <sbi/sbi_console.h>
+#include <sbi/sbi_timer.h>
 
 #define ENCL_MAX  16
+#define MAX_VERIFIABLE_NONCES 50
 
 struct enclave enclaves[ENCL_MAX];
 #define ENCLAVE_EXISTS(eid) (eid >= 0 && eid < ENCL_MAX && enclaves[eid].state >= 0)
 
+static int evict_idx = 0;
+
 static spinlock_t encl_lock = SPIN_LOCK_INITIALIZER;
+
+static spinlock_t nonce_lock = SPIN_LOCK_INITIALIZER;
+static unsigned long verifiable_nonces[MAX_VERIFIABLE_NONCES];
+//static enclave_id nonce_to_enclave_ids[MAX_VERIFIABLE_NONCES][ENCL_MAX];
+static char nonces_to_hashes[MAX_VERIFIABLE_NONCES][ENCL_MAX][64];
 
 extern void save_host_regs(void);
 extern void restore_host_regs(void);
 extern byte dev_public_key[PUBLIC_KEY_SIZE];
+
+static u64 get_ticks(void)
+{
+        return sbi_timer_value();
+}
+
+int add_tracking_entry(unsigned long nonce)
+{
+	spin_lock(&nonce_lock);
+	int free_idx = -1;
+
+	for (int i = 0; i < MAX_VERIFIABLE_NONCES; i++) {
+		if (verifiable_nonces[i] == nonce && nonce != 0) {
+			return 0;
+		}
+	}
+
+
+	for (int i = 0; i < MAX_VERIFIABLE_NONCES; i++) {
+		if (verifiable_nonces[i] == 0) {
+			free_idx = i;
+		}
+	}
+
+	//evict a nonce entry from evict_idx
+	if (free_idx == -1) {
+		//clear all hashes for this entry
+		for (int i = 0; i < ENCL_MAX; i++) {
+			for (int j = 0; j < 64; j++) {
+				nonces_to_hashes[evict_idx][i][j] = 0;
+			}
+		}
+
+		free_idx = evict_idx;
+		evict_idx = (evict_idx + 1) % MAX_VERIFIABLE_NONCES;
+	}
+
+	verifiable_nonces[free_idx] = nonce;
+
+	spin_unlock(&nonce_lock);
+
+	return 1;
+}
+
+int verify_nonce(unsigned long nonce, enclave_id eid)
+{
+	spin_lock(&nonce_lock);
+	spin_lock(&encl_lock);
+
+	int nonce_idx = -1;
+	for (int i = 0; i < MAX_VERIFIABLE_NONCES; i++) {
+		if (verifiable_nonces[i] == nonce) {
+			nonce_idx = i;
+		}
+	}
+
+	if (nonce_idx == -1)
+		return 0;
+
+	//int found_hash = 0;
+	int all_zeroes_idx = 100000;
+	for (int i = 0; i < ENCL_MAX; i++) {
+		int match = 1;
+		int all_zeroes = 1;
+		for (int j = 0; j < 64; j++) {
+			if (nonces_to_hashes[nonce_idx][i][j] != enclaves[eid].hash[j]) {
+				match = 0;
+			}
+
+			if (nonces_to_hashes[nonce_idx][i][j] != 0) {
+				all_zeroes = 0;
+			}
+		}
+
+		if (match) {
+			return 0;
+		}
+
+		if (all_zeroes) {
+			if (all_zeroes_idx == 100000) {
+				all_zeroes_idx = i;
+			}
+		}
+	}
+
+	if (all_zeroes_idx == 100000) {
+		return 0;
+	}
+
+	//Insert hash into empty slot
+	for(int j = 0; j < 64; j++)
+		nonces_to_hashes[nonce_idx][all_zeroes_idx][j] = enclaves[eid].hash[j];
+
+	spin_unlock(&encl_lock);
+	spin_unlock(&nonce_lock);
+
+	return 1;
+
+}
 
 /****************************
  *
@@ -157,6 +266,17 @@ void enclave_init_metadata(){
     /* Fire all platform specific init for each enclave */
     platform_init_enclave(&(enclaves[eid]));
   }
+
+  int j = 0;
+  //Initialize all nonce metadata for use
+  for (i = 0; i < MAX_VERIFIABLE_NONCES; i++) {
+	verifiable_nonces[i] = 0;
+	for (j = 0; j < ENCL_MAX; j++) {
+		for (int k = 0; k < 64; k++)
+			nonces_to_hashes[i][j][k] = 0;
+	}
+  }
+
 
 }
 
@@ -338,6 +458,7 @@ static int is_create_args_valid(struct keystone_sbi_create* args)
 unsigned long create_enclave(unsigned long *eidptr, struct keystone_sbi_create create_args)
 {
   /* EPM and UTM parameters */
+  u64 enclave_start_time = get_ticks();
   uintptr_t base = create_args.epm_region.paddr;
   size_t size = create_args.epm_region.size;
   uintptr_t utbase = create_args.utm_region.paddr;
@@ -408,6 +529,7 @@ unsigned long create_enclave(unsigned long *eidptr, struct keystone_sbi_create c
   if (ret)
     goto unset_region;
 
+  u64 create_enclave_startup_end = get_ticks();
   /* Validate memory, prepare hash and signature for attestation */
   spin_lock(&encl_lock); // FIXME This should error for second enter.
   ret = validate_and_hash_enclave(&enclaves[eid]);
@@ -420,6 +542,10 @@ unsigned long create_enclave(unsigned long *eidptr, struct keystone_sbi_create c
   *eidptr = eid;
 
   spin_unlock(&encl_lock);
+  u64 create_enclave_hash_end = get_ticks();
+  sbi_printf("[SM] create_enclave ticks till hashing code: %lu\n [SM] create_enclave ticks of hashing code: %lu\n [SM] create_enclave total ticks: %lu\n",
+		  create_enclave_startup_end - enclave_start_time, create_enclave_hash_end - create_enclave_startup_end, create_enclave_hash_end - enclave_start_time);
+
   return SBI_ERR_SM_ENCLAVE_SUCCESS;
 
 unlock:
